@@ -83,4 +83,55 @@ export class AuthManager {
     public shouldUse(name: string): void {
         this.config.default = name;
     }
+
+    // Proxy methods to the default guard
+    public async check(): Promise<boolean> {
+        return await this.guard().check();
+    }
+
+    public async guest(): Promise<boolean> {
+        return await this.guard().guest();
+    }
+
+    public async user(): Promise<any> {
+        return await this.guard().user();
+    }
+
+    public async id(): Promise<string | number | null> {
+        return await this.guard().id();
+    }
+
+    public async validate(credentials: Record<string, any>): Promise<boolean> {
+        return await this.guard().validate(credentials);
+    }
+
+    public setUser(user: any): void {
+        this.guard().setUser(user);
+    }
+
+    public async attempt(credentials: Record<string, any>): Promise<boolean> {
+        const guard = this.guard() as any;
+        if (typeof guard.attempt === 'function') {
+            return await guard.attempt(credentials);
+        }
+        throw new Error(`Guard [${this.config.default}] does not support login attempts.`);
+    }
+
+    public login(user: any): void {
+        const guard = this.guard() as any;
+        if (typeof guard.login === 'function') {
+            guard.login(user);
+            return;
+        }
+        throw new Error(`Guard [${this.config.default}] does not support login.`);
+    }
+
+    public logout(): void {
+        const guard = this.guard() as any;
+        if (typeof guard.logout === 'function') {
+            guard.logout();
+            return;
+        }
+        throw new Error(`Guard [${this.config.default}] does not support logout.`);
+    }
 }

@@ -48,6 +48,23 @@ describe('Arika Auth', () => {
         assert.ok(isSessionGuard);
     });
 
+    it('proxies methods to default guard', async () => {
+        // Should use default 'web' guard -> session driver
+        const success = await authManager.attempt({ email: 'test@example.com', password: 'secret' });
+        assert.strictEqual(success, true);
+
+        const user = await authManager.user();
+        assert.ok(user);
+        assert.strictEqual(user.id, 1);
+
+        const check = await authManager.check();
+        assert.strictEqual(check, true);
+
+        authManager.logout();
+        const checkAfterLogout = await authManager.check();
+        assert.strictEqual(checkAfterLogout, false);
+    });
+
     it('can attempt login via session guard', async () => {
         const guard = authManager.guard('web');
         const success = await guard.validate({ email: 'test@example.com', password: 'secret' });
