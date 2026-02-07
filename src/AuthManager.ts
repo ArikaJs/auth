@@ -53,12 +53,23 @@ export class AuthManager {
         throw new Error(`Auth driver [${config.driver}] for guard [${name}] is not supported.`);
     }
 
+    private currentRequest: any = {};
+
+    public setRequest(request: any): void {
+        this.currentRequest = request;
+        this.guards.forEach(guard => {
+            if (guard.setRequest) {
+                guard.setRequest(request);
+            }
+        });
+    }
+
     private createSessionDriver(name: string, config: any): SessionGuard {
         const provider = this.providers.get(config.provider);
         if (!provider) {
             throw new Error(`User provider [${config.provider}] is not defined.`);
         }
-        return new SessionGuard(provider, {}); // TODO: Contextual Session Binding
+        return new SessionGuard(provider, this.currentRequest);
     }
 
     private createTokenDriver(name: string, config: any): Guard {
@@ -66,8 +77,7 @@ export class AuthManager {
         if (!provider) {
             throw new Error(`User provider [${config.provider}] is not defined.`);
         }
-        // TODO: Contextual Request Binding
-        return new TokenGuard(provider, {});
+        return new TokenGuard(provider, this.currentRequest);
     }
 
     public shouldUse(name: string): void {

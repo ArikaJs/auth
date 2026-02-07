@@ -70,4 +70,32 @@ describe('Arika Auth', () => {
         const invalid = await Hasher.check('wrong', hash);
         assert.strictEqual(invalid, false);
     });
+
+    it('middleware protects routes', async () => {
+        const { Authenticate } = require('../src/Middleware/Authenticate');
+        const middleware = new Authenticate(authManager);
+
+        const next = async () => 'success';
+
+        // Mock request with token
+        const request = {
+            headers: { authorization: 'Bearer token-123' },
+            user: null
+        };
+
+        // Hack: mock the provider to accept this token
+        const provider = authManager['providers'].get('users') as MockPoolProvider;
+        provider.retrieveByCredentials = async (creds) => {
+            if (creds.api_token === 'token-123') return { id: 1 };
+            return null;
+        };
+
+        // Should pass
+        const result = await middleware.handle(request, next, 'api');
+        assert.strictEqual(result, 'success');
+
+        // Should update guard request
+        const user = await authManager.guard('api').user();
+        assert.strictEqual(user.id, 1);
+    });
 });

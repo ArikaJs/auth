@@ -45,6 +45,10 @@ export class TokenGuard implements Guard {
         }
     }
 
+    public setRequest(request: any): void {
+        this.request = request;
+    }
+
     protected getTokenForRequest(): string | null {
         // Simple implementation: check query param, input body, or Bearer token
         if (this.request.query && this.request.query[this.inputKey]) {

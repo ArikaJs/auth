@@ -74,4 +74,11 @@ export class SessionGuard implements Guard {
     public setUser(user: any): void {
         this.loggedUser = user;
     }
+
+    public setRequest(request: any): void {
+        // In a real framework, this would bind the session from the request
+        if (request.session) {
+            this.session = request.session;
+        }
+    }
 }

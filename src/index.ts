@@ -4,3 +4,4 @@ export * from './Hasher';
 export * from './Contracts/UserProvider';
 export * from './Guards/SessionGuard';
 export * from './Guards/TokenGuard';
+export * from './Middleware/Authenticate';
