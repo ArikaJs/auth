@@ -38,11 +38,13 @@
     },
     "homepage": "https://github.com/arikajs/auth#readme",
     "dependencies": {
-        "bcryptjs": "^2.4.3"
+        "bcryptjs": "^2.4.3",
+        "jsonwebtoken": "^9.0.3"
     },
     "devDependencies": {
-        "@types/node": "^20.11.24",
         "@types/bcryptjs": "^2.4.6",
+        "@types/jsonwebtoken": "^9.0.10",
+        "@types/node": "^20.11.24",
         "typescript": "^5.3.3"
     },
     "author": "Prakash Tank"

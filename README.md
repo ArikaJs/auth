@@ -114,8 +114,10 @@ Guards define how users are authenticated.
 
 | Guard | Description |
 | :--- | :--- |
-| `session` | Cookie/session-based authentication |
+| `session` | Cookie/session-based authentication with "Remember Me" support |
+| `jwt` | Stateless API authentication using JSON Web Tokens (JWT) |
 | `token` | Header-based token authentication |
+| `basic` | HTTP Basic Authentication support |
 
 ---
 
@@ -126,8 +128,10 @@ User providers define how users are retrieved.
 ```ts
 export interface UserProvider {
   retrieveById(id: string | number): Promise<any>;
-  retrieveByCredentials(credentials: object): Promise<any>;
-  validateCredentials(user: any, credentials: object): boolean;
+  retrieveByToken?(id: string | number, token: string): Promise<any>;
+  updateRememberToken?(user: any, token: string | null): Promise<void>;
+  retrieveByCredentials(credentials: Record<string, any>): Promise<any>;
+  validateCredentials(user: any, credentials: Record<string, any>): boolean | Promise<boolean>;
 }
 ```
 
@@ -150,10 +154,11 @@ if (auth.check()) {
 ### Attempting Login
 
 ```ts
+// The second parameter `true` enables "Remember Me"
 const success = await auth.attempt({
   email: 'test@example.com',
   password: 'secret',
-});
+}, true);
 
 if (!success) {
   throw new Error('Invalid credentials');
@@ -163,7 +168,7 @@ if (!success) {
 ### Logging Out
 
 ```ts
-auth.logout();
+await auth.logout();
 ```
 
 ---
@@ -181,8 +186,42 @@ Route.get('/dashboard', handler)
 
 ```ts
 Route.get('/api/user', handler)
-  .middleware(['auth:token']);
+  .middleware(['auth:jwt']); // or auth:token, auth:basic
 ```
+
+---
+
+## 🚀 Advanced Features
+
+### Stateless JWT Authentication
+Get high-performance stateless API auth without querying `api_token` in your database.
+```ts
+const jwtString = await auth.guard('jwt').attempt({ email, password });
+// Issues standard Bearer eyJhbX...
+```
+
+### "Remember Me" Capability
+Keep users logged in seamlessly across browser restarts using long-lived secure cookies.
+```ts
+// Just pass `true` as the second argument:
+await auth.attempt(credentials, true);
+```
+
+### Login Throttling (Rate Limiting)
+ArikaJS Auth automatically integrates with RateLimiters to protect against brute-force attacks!
+```ts
+// If an IP/email hits max failed logins (e.g. 5x)
+// `auth.attempt` throws Error: 'Too many login attempts.'
+authManager.setRateLimiter(new RedisRateLimiter());
+```
+
+### Event Dispatching
+ArikaJS fires core auth events so you can hook into the lifecycle without modifying your controllers (e.g. for logging or email alerts):
+- `Auth.Attempting`
+- `Auth.Login`
+- `Auth.Failed`
+- `Auth.Logout`
+- `Auth.Lockout`
 
 ---
 
@@ -227,12 +266,12 @@ Uses industry-standard hashing algorithms.
   - `AuthManager.ts` – Main entry point
   - `Guard.ts` – Guard interface
   - `Guards/` – Implementations
-    - `SessionGuard.ts`, `TokenGuard.ts`
+    - `SessionGuard.ts`, `TokenGuard.ts`, `JwtGuard.ts`, `BasicGuard.ts`
   - `Hasher.ts` – Password hashing utility
   - `Middleware/` – Auth middleware
     - `Authenticate.ts`
   - `Contracts/` – Interfaces
-    - `UserProvider.ts`
+    - `UserProvider.ts`, `EventDispatcher.ts`, `RateLimiter.ts`
   - `index.ts` – Public exports
 - `package.json`
 - `tsconfig.json`
