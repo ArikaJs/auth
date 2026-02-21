@@ -15,25 +15,29 @@ export class Authenticate {
 
     /**
      * Handle the incoming request.
+     * Creates a per-request AuthContext and binds it to req.auth
      */
     public async handle(request: any, next: (request: any) => Promise<any> | any): Promise<any> {
-        // 1. Bind the current request to the AuthManager/Guards
-        this.auth.setRequest(request);
+        // 1. Create an isolated AuthContext for this request (binds to req.auth)
+        const context = this.auth.createContext(request);
 
-        // 2. Determine guards to check
-        const guardsToCheck = this.guards.length === 0
-            ? [undefined as unknown as string]
-            : this.guards;
+        // 2. Run the rest of the request within this context (for global facade support)
+        return await this.auth.runWithContext(context, async () => {
+            // 3. Determine guards to check
+            const guardsToCheck = this.guards.length === 0
+                ? [this.auth.getDefaultGuard()]
+                : this.guards;
 
-        // 3. Check each guard
-        for (const guard of guardsToCheck) {
-            if (await this.auth.guard(guard).check()) {
-                this.auth.shouldUse(guard);
-                return next(request);
+            // 4. Check each guard
+            for (const guard of guardsToCheck) {
+                if (await context.guard(guard).check()) {
+                    this.auth.shouldUse(guard);
+                    return next(request);
+                }
             }
-        }
 
-        // 4. Fail if no guard authenticated
-        throw new Error('Unauthenticated.');
+            // 5. Fail if no guard authenticated
+            throw new Error('Unauthenticated.');
+        });
     }
 }

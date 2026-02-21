@@ -1,6 +1,6 @@
 import { describe, it, beforeEach } from 'node:test';
 import * as assert from 'node:assert';
-import { AuthManager, Hasher, UserProvider } from '../src';
+import { AuthManager, Hasher, UserProvider, AuthContext } from '../src';
 import { SessionGuard } from '../src/Guards/SessionGuard';
 
 class MockPoolProvider implements UserProvider {
@@ -26,7 +26,7 @@ class MockPoolProvider implements UserProvider {
 
 describe('Arika Auth', () => {
     let authManager: AuthManager;
-    let config;
+    let config: any;
 
     beforeEach(() => {
         config = {
@@ -40,33 +40,45 @@ describe('Arika Auth', () => {
         authManager.registerProvider('users', new MockPoolProvider());
     });
 
-    it('resolves session guard by default', async () => {
-        const guard = authManager.guard();
+    it('resolves session guard by default via context', async () => {
+        const request = { session: { get: () => null, put: () => { } } };
+        const ctx = authManager.createContext(request);
+        const guard = ctx.guard();
         assert.ok(guard);
-        // We know it's a SessionGuard because of the config 'driver: session'
         const isSessionGuard = guard instanceof SessionGuard || guard.constructor.name === 'SessionGuard';
         assert.ok(isSessionGuard);
     });
 
-    it('proxies methods to default guard', async () => {
-        // Should use default 'web' guard -> session driver
-        const success = await authManager.attempt({ email: 'test@example.com', password: 'secret' });
+    it('proxies methods through context', async () => {
+        const session: Record<string, any> = {};
+        const request = {
+            session: {
+                get: (key: string) => session[key] || null,
+                put: (key: string, val: any) => { session[key] = val; },
+                forget: (key: string) => { delete session[key]; }
+            }
+        };
+        const ctx = authManager.createContext(request);
+
+        const success = await ctx.attempt({ email: 'test@example.com', password: 'secret' });
         assert.strictEqual(success, true);
 
-        const user = await authManager.user();
+        const user = await ctx.user();
         assert.ok(user);
         assert.strictEqual(user.id, 1);
 
-        const check = await authManager.check();
+        const check = await ctx.check();
         assert.strictEqual(check, true);
 
-        authManager.logout();
-        const checkAfterLogout = await authManager.check();
+        await ctx.logout();
+        const checkAfterLogout = await ctx.check();
         assert.strictEqual(checkAfterLogout, false);
     });
 
-    it('can attempt login via session guard', async () => {
-        const guard = authManager.guard('web');
+    it('can validate credentials via context guard', async () => {
+        const request = { session: { get: () => null, put: () => { } } };
+        const ctx = authManager.createContext(request);
+        const guard = ctx.guard('web');
         const success = await guard.validate({ email: 'test@example.com', password: 'secret' });
         assert.strictEqual(success, true);
 
@@ -88,7 +100,41 @@ describe('Arika Auth', () => {
         assert.strictEqual(invalid, false);
     });
 
-    it('middleware protects routes', async () => {
+    it('request-scoped auth context isolation', async () => {
+        // Simulate two concurrent requests
+        const session1: Record<string, any> = {};
+        const request1 = {
+            session: {
+                get: (key: string) => session1[key] || null,
+                put: (key: string, val: any) => { session1[key] = val; },
+                forget: (key: string) => { delete session1[key]; }
+            }
+        };
+
+        const session2: Record<string, any> = {};
+        const request2 = {
+            session: {
+                get: (key: string) => session2[key] || null,
+                put: (key: string, val: any) => { session2[key] = val; },
+                forget: (key: string) => { delete session2[key]; }
+            }
+        };
+
+        const ctx1 = authManager.createContext(request1);
+        const ctx2 = authManager.createContext(request2);
+
+        // Log in user on ctx1 only
+        await ctx1.attempt({ email: 'test@example.com', password: 'secret' });
+
+        const user1 = await ctx1.user();
+        assert.ok(user1);
+
+        // ctx2 should NOT have a user
+        const user2 = await ctx2.user();
+        assert.strictEqual(user2, null);
+    });
+
+    it('middleware protects routes with AuthContext', async () => {
         const { Authenticate } = require('../src/Middleware/Authenticate');
         const middleware = new Authenticate(authManager);
 
@@ -97,8 +143,12 @@ describe('Arika Auth', () => {
         // Mock request with token
         const request = {
             headers: { authorization: 'Bearer token-123' },
-            user: null
+            user: null,
+            session: { get: () => null, put: () => { } }
         };
+
+        // Override config to default to 'api' for this test
+        config.default = 'api';
 
         // Hack: mock the provider to accept this token
         const provider = authManager['providers'].get('users') as MockPoolProvider;
@@ -108,11 +158,12 @@ describe('Arika Auth', () => {
         };
 
         // Should pass
-        const result = await middleware.handle(request, next, 'api');
+        const result = await middleware.handle(request, next);
         assert.strictEqual(result, 'success');
 
-        // Should update guard request
-        const user = await authManager.guard('api').user();
+        // req.auth should have been set
+        assert.ok((request as any).auth);
+        const user = await (request as any).auth.user();
         assert.strictEqual(user.id, 1);
     });
 });

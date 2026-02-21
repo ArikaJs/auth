@@ -7,9 +7,8 @@ It enables applications to authenticate users using session-based (web) or token
 ```ts
 import { AuthManager } from '@arikajs/auth';
 
-if (await auth.attempt({ email, password })) {
-  const user = auth.user();
-}
+// Per-request scoped — safe for concurrent requests
+const user = await req.auth.user();
 ```
 
 ---
@@ -63,18 +62,26 @@ This package is responsible for:
 
 ## Features
 
+- **Request-scoped auth context**
+  - Memory-safe, per-request isolation via `req.auth` — no leaks under concurrency.
 - **Multiple authentication guards**
-  - Configure different strategies for API vs Web.
-- **Session-based authentication**
-  - Secure defaults for browser-based apps.
-- **Token-based authentication**
-  - Simple API token validation.
+  - Configure different strategies for API vs Web (Session, JWT, Token, Basic).
+- **Stateless JWT with Refresh Tokens**
+  - Short-lived access tokens + rotating refresh tokens for modern APIs.
+- **"Remember Me" support**
+  - Persistent login across browser restarts with secure cookie rotation.
+- **Email verification system**
+  - Verify user emails with a simple API and `verified` middleware.
+- **Password reset flow**
+  - Token-based resets with expiry and hash-secured storage.
+- **Account locking & throttling**
+  - Soft lock after N failures, auto-unlock, manual unlock.
+- **Auth event dispatching**
+  - Hook into `Auth.Login`, `Auth.Failed`, `Auth.Lockout`, etc.
 - **Pluggable user providers**
   - Connect to any database or ORM.
 - **Secure password hashing**
   - Industry-standard hashing algorithms (Bcrypt/Argon2).
-- **Middleware-based protection**
-  - Easily secure routes.
 
 ---
 
@@ -95,13 +102,13 @@ pnpm add @arikajs/auth
 ```
 Request
   ↓
-Authenticate Middleware
+Authenticate Middleware  ← creates req.auth (AuthContext)
   ↓
-Auth Guard
+AuthContext → Guard (Session / JWT / Token / Basic)
   ↓
 User Provider
   ↓
-Authenticated User (or null)
+Authenticated User (or reject)
 ```
 
 ---
@@ -130,6 +137,8 @@ export interface UserProvider {
   retrieveById(id: string | number): Promise<any>;
   retrieveByToken?(id: string | number, token: string): Promise<any>;
   updateRememberToken?(user: any, token: string | null): Promise<void>;
+  updateRefreshToken?(user: any, token: string | null): Promise<void>;
+  retrieveByRefreshToken?(token: string): Promise<any>;
   retrieveByCredentials(credentials: Record<string, any>): Promise<any>;
   validateCredentials(user: any, credentials: Record<string, any>): boolean | Promise<boolean>;
 }
@@ -141,14 +150,17 @@ Providers allow you to integrate any database or user store.
 
 ## 🔌 Basic Usage
 
-### Checking Authentication State
+### Checking Authentication State (per-request)
 
 ```ts
-import { auth } from '@arikajs/auth';
-
-if (auth.check()) {
-  const user = auth.user();
+// In your controller — req.auth is automatically bound by the Authenticate middleware
+if (await req.auth.check()) {
+  const user = await req.auth.user();
 }
+
+// Or via the global facade (backed by AsyncLocalStorage):
+import { auth } from '@arikajs/auth';
+const user = await auth.user();
 ```
 
 ### Attempting Login
@@ -193,35 +205,91 @@ Route.get('/api/user', handler)
 
 ## 🚀 Advanced Features
 
-### Stateless JWT Authentication
-Get high-performance stateless API auth without querying `api_token` in your database.
+### 🔒 Request-Scoped Auth Context (Critical for Concurrency)
+Every incoming request gets its own isolated `AuthContext`. No shared mutable state, no memory leaks under concurrent load.
 ```ts
-const jwtString = await auth.guard('jwt').attempt({ email, password });
-// Issues standard Bearer eyJhbX...
+// The Authenticate middleware does this automatically:
+const context = authManager.createContext(request);
+// Now: req.auth.user(), req.auth.check(), req.auth.attempt() are all request-scoped
 ```
 
-### "Remember Me" Capability
+### 🔑 Stateless JWT with Refresh Tokens
+Short-lived access tokens + secure refresh token rotation for modern API architectures:
+```ts
+// Login returns both tokens
+const result = await req.auth.guard('jwt').attempt({ email, password });
+// result = { access_token: 'eyJhbG...', refresh_token: '9f3a7b...' }
+
+// Refresh when the access token expires
+const newTokens = await jwtGuard.refresh(oldRefreshToken);
+// Returns rotated access + refresh tokens
+```
+
+### 🍪 "Remember Me" Capability
 Keep users logged in seamlessly across browser restarts using long-lived secure cookies.
 ```ts
-// Just pass `true` as the second argument:
-await auth.attempt(credentials, true);
+await req.auth.attempt(credentials, true); // true = remember me
 ```
 
-### Login Throttling (Rate Limiting)
+### ✉️ Email Verification System
+Verify user emails with a simple API and protect routes that require verification:
+```ts
+// Send verification email
+await req.auth.sendVerification(user);
+
+// Protect routes requiring email verification
+Route.get('/billing', handler)
+  .middleware(['auth', 'verified']);
+```
+
+### 🔐 Password Reset Flow
+Full token-based password reset with expiry and hash-secured storage:
+```ts
+import { PasswordResetBroker } from '@arikajs/auth';
+
+const broker = new PasswordResetBroker(userProvider);
+
+// Send reset link
+const status = await broker.sendResetLink({ email: 'user@example.com' });
+
+// Reset password with token
+const result = await broker.reset(
+  { email, token, password: newPassword },
+  async (user, password) => {
+    user.password = await Hasher.make(password);
+    await user.save();
+  }
+);
+```
+
+### 🛡️ Account Locking Strategy
+Soft lock accounts after too many failed attempts. Auto-unlock after configured duration. Manual unlock for admins.
+```ts
+// Check if account is locked
+const locked = await req.auth.isLocked({ email });
+
+// Manually unlock (e.g., admin action)
+await req.auth.unlockAccount({ email });
+
+// Configuration:
+// { lockout: { maxAttempts: 5, decayMinutes: 15 } }
+```
+
+### 🛡️ Login Throttling (Rate Limiting)
 ArikaJS Auth automatically integrates with RateLimiters to protect against brute-force attacks!
 ```ts
-// If an IP/email hits max failed logins (e.g. 5x)
-// `auth.attempt` throws Error: 'Too many login attempts.'
 authManager.setRateLimiter(new RedisRateLimiter());
 ```
 
-### Event Dispatching
-ArikaJS fires core auth events so you can hook into the lifecycle without modifying your controllers (e.g. for logging or email alerts):
-- `Auth.Attempting`
-- `Auth.Login`
-- `Auth.Failed`
-- `Auth.Logout`
-- `Auth.Lockout`
+### 📡 Event Dispatching
+ArikaJS fires core auth events so you can hook into the lifecycle:
+- `Auth.Attempting` — login attempt started
+- `Auth.Login` — successful login
+- `Auth.Failed` — failed login attempt
+- `Auth.Logout` — user logged out
+- `Auth.Lockout` — account locked due to too many failures
+- `Auth.VerificationSent` — verification email dispatched
+- `Auth.AccountUnlocked` — account manually unlocked
 
 ---
 
@@ -229,18 +297,18 @@ ArikaJS fires core auth events so you can hook into the lifecycle without modify
 
 Example configuration:
 
-```json
+```ts
 {
-  "default": "session",
-  "guards": {
-    "session": {
-      "driver": "session",
-      "provider": "users"
-    },
-    "token": {
-      "driver": "token",
-      "provider": "users"
-    }
+  default: 'session',
+  guards: {
+    session: { driver: 'session', provider: 'users' },
+    jwt:     { driver: 'jwt',     provider: 'users', secret: 'your-jwt-secret', options: { expiresIn: '15m' } },
+    token:   { driver: 'token',   provider: 'users' },
+    basic:   { driver: 'basic',   provider: 'users' }
+  },
+  lockout: {
+    maxAttempts: 5,
+    decayMinutes: 15
   }
 }
 ```
@@ -263,15 +331,19 @@ Uses industry-standard hashing algorithms.
 ## 🧱 Project Structure
 
 - `src/`
-  - `AuthManager.ts` – Main entry point
+  - `AuthManager.ts` – Main entry point & guard factory
+  - `AuthContext.ts` – Per-request scoped auth instance
   - `Guard.ts` – Guard interface
   - `Guards/` – Implementations
     - `SessionGuard.ts`, `TokenGuard.ts`, `JwtGuard.ts`, `BasicGuard.ts`
   - `Hasher.ts` – Password hashing utility
+  - `Passwords/` – Password reset system
+    - `PasswordResetBroker.ts`
   - `Middleware/` – Auth middleware
-    - `Authenticate.ts`
+    - `Authenticate.ts`, `EnsureEmailIsVerified.ts`
   - `Contracts/` – Interfaces
     - `UserProvider.ts`, `EventDispatcher.ts`, `RateLimiter.ts`
+    - `CanVerifyEmail.ts`, `CanResetPassword.ts`, `PasswordBroker.ts`
   - `index.ts` – Public exports
 - `package.json`
 - `tsconfig.json`

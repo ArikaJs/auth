@@ -6,13 +6,15 @@ import { SessionGuard } from './Guards/SessionGuard';
 import { TokenGuard } from './Guards/TokenGuard';
 import { JwtGuard } from './Guards/JwtGuard';
 import { BasicGuard } from './Guards/BasicGuard';
+import { AuthContext } from './AuthContext';
+import { AsyncLocalStorage } from 'async_hooks';
 
 export class AuthManager {
-    private guards: Map<string, Guard> = new Map();
     private providers: Map<string, UserProvider> = new Map();
     private eventDispatcher: EventDispatcher | null = null;
     private rateLimiter: RateLimiter | null = null;
     private config: any;
+    private als = new AsyncLocalStorage<AuthContext>();
 
     constructor(config: any) {
         this.config = config;
@@ -34,22 +36,22 @@ export class AuthManager {
         // Implementation for custom guards
     }
 
-    public guard(name?: string): Guard {
-        name = name || this.config.default;
-
-        // Handle undefined name from config explicitly
-        if (!name) {
-            throw new Error('No auth guard defined.');
-        }
-
-        if (!this.guards.has(name)) {
-            this.guards.set(name, this.resolveGuard(name));
-        }
-
-        return this.guards.get(name)!;
+    public getDefaultGuard(): string {
+        return this.config.default;
     }
 
-    private resolveGuard(name: string): Guard {
+    public createContext(request: any): AuthContext {
+        const context = new AuthContext(this, request);
+
+        // Optionally bind it directly to the request
+        if (request) {
+            request.auth = context;
+        }
+
+        return context;
+    }
+
+    public resolveGuard(name: string, request: any): Guard {
         const config = this.config.guards[name];
 
         if (!config) {
@@ -57,100 +59,114 @@ export class AuthManager {
         }
 
         if (config.driver === 'session') {
-            return this.createSessionDriver(name, config);
+            return this.createSessionDriver(name, config, request);
         }
 
         if (config.driver === 'token') {
-            return this.createTokenDriver(name, config);
+            return this.createTokenDriver(name, config, request);
         }
 
         if (config.driver === 'jwt') {
-            return this.createJwtDriver(name, config);
+            return this.createJwtDriver(name, config, request);
         }
 
         if (config.driver === 'basic') {
-            return this.createBasicDriver(name, config);
+            return this.createBasicDriver(name, config, request);
         }
 
         throw new Error(`Auth driver [${config.driver}] for guard [${name}] is not supported.`);
     }
 
-    private currentRequest: any = {};
-
-    public setRequest(request: any): void {
-        this.currentRequest = request;
-        this.guards.forEach(guard => {
-            if (guard.setRequest) {
-                guard.setRequest(request);
-            }
-        });
-    }
-
-    private createSessionDriver(name: string, config: any): SessionGuard {
+    private createSessionDriver(name: string, config: any, request: any): SessionGuard {
         const provider = this.providers.get(config.provider);
         if (!provider) {
             throw new Error(`User provider [${config.provider}] is not defined.`);
         }
-        return new SessionGuard(provider, this.currentRequest);
+        return new SessionGuard(provider, request.session);
     }
 
-    private createTokenDriver(name: string, config: any): Guard {
+    private createTokenDriver(name: string, config: any, request: any): Guard {
         const provider = this.providers.get(config.provider);
         if (!provider) {
             throw new Error(`User provider [${config.provider}] is not defined.`);
         }
-        return new TokenGuard(provider, this.currentRequest);
+        return new TokenGuard(provider, request);
     }
 
-    private createJwtDriver(name: string, config: any): Guard {
+    private createJwtDriver(name: string, config: any, request: any): Guard {
         const provider = this.providers.get(config.provider);
         if (!provider) {
             throw new Error(`User provider [${config.provider}] is not defined.`);
         }
-        return new JwtGuard(provider, this.currentRequest, config.secret || 'default_secret', config.options || {});
+        return new JwtGuard(provider, request, config.secret || 'default_secret', config.options || {});
     }
 
-    private createBasicDriver(name: string, config: any): Guard {
+    private createBasicDriver(name: string, config: any, request: any): Guard {
         const provider = this.providers.get(config.provider);
         if (!provider) {
             throw new Error(`User provider [${config.provider}] is not defined.`);
         }
-        return new BasicGuard(provider, this.currentRequest);
+        return new BasicGuard(provider, request);
     }
 
     public shouldUse(name: string): void {
         this.config.default = name;
     }
 
-    // Proxy methods to the default guard
+    public runWithContext<T>(context: AuthContext, fn: () => T | Promise<T>): T | Promise<T> {
+        return this.als.run(context, fn);
+    }
+
+    private getContext(): AuthContext {
+        const ctx = this.als.getStore();
+        if (!ctx) {
+            throw new Error('AuthContext not found. Ensure you are running within a request scope or use req.auth instead of the global facade.');
+        }
+        return ctx;
+    }
+
+    // Proxy methods to the context
     public async check(): Promise<boolean> {
-        return await this.guard().check();
+        return await this.getContext().check();
     }
 
     public async guest(): Promise<boolean> {
-        return await this.guard().guest();
+        return await this.getContext().guest();
     }
 
     public async user(): Promise<any> {
-        return await this.guard().user();
+        return await this.getContext().user();
     }
 
     public async id(): Promise<string | number | null> {
-        return await this.guard().id();
+        return await this.getContext().id();
     }
 
     public async validate(credentials: Record<string, any>): Promise<boolean> {
-        return await this.guard().validate(credentials);
+        return await this.getContext().validate(credentials);
     }
 
     public setUser(user: any): void {
-        this.guard().setUser(user);
+        this.getContext().setUser(user);
     }
 
     public async attempt(credentials: Record<string, any>, remember: boolean = false): Promise<boolean | string> {
+        return await this.getContext().attempt(credentials, remember);
+    }
+
+    public async login(user: any, remember: boolean = false): Promise<void> {
+        return await this.getContext().login(user, remember);
+    }
+
+    public async logout(): Promise<void> {
+        return await this.getContext().logout();
+    }
+
+    // Called by AuthContext to run attempts
+    public async attemptForContext(context: AuthContext, credentials: Record<string, any>, remember: boolean = false): Promise<boolean | string> {
         this.fireEvent('Auth.Attempting', { credentials, remember, guard: this.config.default });
 
-        const throttleKey = this.getThrottleKey(credentials);
+        const throttleKey = this.getThrottleKey(credentials, context.getRequest());
 
         if (throttleKey && this.rateLimiter) {
             if (await this.rateLimiter.tooManyAttempts(throttleKey, 5)) {
@@ -159,7 +175,7 @@ export class AuthManager {
             }
         }
 
-        const guard = this.guard() as any;
+        const guard = context.guard() as any;
         if (typeof guard.attempt === 'function') {
             const successOrToken = await guard.attempt(credentials, remember);
 
@@ -183,8 +199,9 @@ export class AuthManager {
         throw new Error(`Guard [${this.config.default}] does not support login attempts.`);
     }
 
-    public async login(user: any, remember: boolean = false): Promise<void> {
-        const guard = this.guard() as any;
+    // Called by AuthContext to log in
+    public async loginForContext(context: AuthContext, user: any, remember: boolean = false): Promise<void> {
+        const guard = context.guard() as any;
         if (typeof guard.login === 'function') {
             await guard.login(user, remember);
             this.fireEvent('Auth.Login', { user, guard: this.config.default });
@@ -193,8 +210,9 @@ export class AuthManager {
         throw new Error(`Guard [${this.config.default}] does not support login.`);
     }
 
-    public async logout(): Promise<void> {
-        const guard = this.guard() as any;
+    // Called by AuthContext to log out
+    public async logoutForContext(context: AuthContext): Promise<void> {
+        const guard = context.guard() as any;
         const user = await guard.user();
 
         if (typeof guard.logout === 'function') {
@@ -205,16 +223,71 @@ export class AuthManager {
         throw new Error(`Guard [${this.config.default}] does not support logout.`);
     }
 
+    // ── Email Verification ──────────────────────────────────────────
+    public async sendVerification(context: AuthContext, user?: any): Promise<void> {
+        const targetUser = user || await context.user();
+        if (!targetUser) {
+            throw new Error('No authenticated user to verify.');
+        }
+
+        if (typeof targetUser.hasVerifiedEmail === 'function' && targetUser.hasVerifiedEmail()) {
+            return; // Already verified
+        }
+
+        if (typeof targetUser.sendEmailVerificationNotification === 'function') {
+            await targetUser.sendEmailVerificationNotification();
+            this.fireEvent('Auth.VerificationSent', { user: targetUser });
+        } else {
+            throw new Error('User model does not implement sendEmailVerificationNotification().');
+        }
+    }
+
+    // ── Account Locking ─────────────────────────────────────────────
+    private get lockoutThreshold(): number {
+        return this.config.lockout?.maxAttempts ?? 5;
+    }
+
+    private get lockoutDuration(): number {
+        return this.config.lockout?.decayMinutes ?? 15;
+    }
+
+    public async isLocked(context: AuthContext, credentials: Record<string, any>): Promise<boolean> {
+        if (!this.rateLimiter) return false;
+
+        const throttleKey = this.getLockKey(credentials, context.getRequest());
+        if (!throttleKey) return false;
+
+        return await this.rateLimiter.tooManyAttempts(throttleKey, this.lockoutThreshold);
+    }
+
+    public async unlockAccount(context: AuthContext, credentials: Record<string, any>): Promise<void> {
+        if (!this.rateLimiter) return;
+
+        const throttleKey = this.getLockKey(credentials, context.getRequest());
+        if (throttleKey) {
+            await this.rateLimiter.clear(throttleKey);
+            this.fireEvent('Auth.AccountUnlocked', { credentials });
+        }
+    }
+
+    private getLockKey(credentials: Record<string, any>, request: any): string | null {
+        if (credentials.email) {
+            const ip = request?.ip || '127.0.0.1';
+            return `account_lock:${credentials.email}:${ip}`;
+        }
+        return null;
+    }
+
+    // ── Internals ───────────────────────────────────────────────────
     private fireEvent(name: string, payload: any): void {
         if (this.eventDispatcher) {
             this.eventDispatcher.dispatch(name, payload);
         }
     }
 
-    private getThrottleKey(credentials: Record<string, any>): string | null {
-        // Typically rate limit by email and potentially IP address
+    private getThrottleKey(credentials: Record<string, any>, request: any): string | null {
         if (credentials.email) {
-            const ip = this.currentRequest?.ip || '127.0.0.1';
+            const ip = request?.ip || '127.0.0.1';
             return `login_attempts:${credentials.email}:${ip}`;
         }
         return null;

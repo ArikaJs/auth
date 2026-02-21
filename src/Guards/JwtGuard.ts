@@ -1,6 +1,7 @@
 import { Guard } from '../Guard';
 import { UserProvider } from '../Contracts/UserProvider';
 import * as jwt from 'jsonwebtoken';
+import * as crypto from 'crypto';
 
 export class JwtGuard implements Guard {
     private provider: UserProvider;
@@ -68,20 +69,43 @@ export class JwtGuard implements Guard {
     }
 
     /**
-     * Authenticate a user and return a JWT token
+     * Authenticate a user and return a JWT token and refresh token
      */
-    public async attempt(credentials: Record<string, any>): Promise<string | false> {
+    public async attempt(credentials: Record<string, any>): Promise<{ access_token: string, refresh_token?: string } | false> {
         const user = await this.provider.retrieveByCredentials(credentials);
         if (user && await this.provider.validateCredentials(user, credentials)) {
             this.login(user);
-            return this.issueToken(user);
+            return await this.issueTokens(user);
         }
         return false;
     }
 
-    public issueToken(user: any, additionalPayload: object = {}): string {
+    public async issueTokens(user: any, additionalPayload: object = {}): Promise<{ access_token: string, refresh_token?: string }> {
         const payload = { sub: user.id, ...additionalPayload };
-        return jwt.sign(payload, this.secret, this.options as jwt.SignOptions);
+        const access_token = jwt.sign(payload, this.secret, this.options as jwt.SignOptions);
+
+        const response: { access_token: string, refresh_token?: string } = { access_token };
+
+        if (this.provider.updateRefreshToken) {
+            const refresh_token = crypto.randomBytes(40).toString('hex');
+            await this.provider.updateRefreshToken(user, refresh_token);
+            response.refresh_token = refresh_token;
+        }
+
+        return response;
+    }
+
+    public async refresh(refreshToken: string): Promise<{ access_token: string, refresh_token?: string }> {
+        if (!this.provider.retrieveByRefreshToken) {
+            throw new Error('UserProvider does not support retrieveByRefreshToken');
+        }
+
+        const user = await this.provider.retrieveByRefreshToken(refreshToken);
+        if (!user) {
+            throw new Error('Invalid or expired refresh token');
+        }
+
+        return await this.issueTokens(user);
     }
 
     public login(user: any): void {
