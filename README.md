@@ -328,48 +328,6 @@ Uses industry-standard hashing algorithms.
 
 ---
 
-## 🧱 Project Structure
-
-- `src/`
-  - `AuthManager.ts` – Main entry point & guard factory
-  - `AuthContext.ts` – Per-request scoped auth instance
-  - `Guard.ts` – Guard interface
-  - `Guards/` – Implementations
-    - `SessionGuard.ts`, `TokenGuard.ts`, `JwtGuard.ts`, `BasicGuard.ts`
-  - `Hasher.ts` – Password hashing utility
-  - `Passwords/` – Password reset system
-    - `PasswordResetBroker.ts`
-  - `Middleware/` – Auth middleware
-    - `Authenticate.ts`, `EnsureEmailIsVerified.ts`
-  - `Contracts/` – Interfaces
-    - `UserProvider.ts`, `EventDispatcher.ts`, `RateLimiter.ts`
-    - `CanVerifyEmail.ts`, `CanResetPassword.ts`, `PasswordBroker.ts`
-  - `index.ts` – Public exports
-- `package.json`
-- `tsconfig.json`
-- `README.md`
-- `LICENSE`
-
----
-
-## Versioning & Stability
-
-- Current version: **v0.x** (experimental)
-- API may change before **v1.0**
-- Will follow semantic versioning after stabilization
-
----
-
-## 📜 License
-
-`@arikajs/auth` is open-sourced software licensed under the **MIT License**.
-
----
-
-## 🧠 Philosophy
-
-> “Authentication identifies the user. Authorization defines their power.”
-
 ## 🏗 Architecture
 
 ```text
@@ -403,3 +361,22 @@ auth/
 └── README.md
 ```
 
+---
+
+## Versioning & Stability
+
+- Current version: **v0.x** (experimental)
+- API may change before **v1.0**
+- Will follow semantic versioning after stabilization
+
+---
+
+## 📜 License
+
+`@arikajs/auth` is open-sourced software licensed under the **MIT License**.
+
+---
+
+## 🧠 Philosophy
+
+> “Authentication identifies the user. Authorization defines their power.”
