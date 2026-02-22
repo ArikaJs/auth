@@ -369,3 +369,37 @@ Uses industry-standard hashing algorithms.
 ## 🧠 Philosophy
 
 > “Authentication identifies the user. Authorization defines their power.”
+
+## 🏗 Architecture
+
+```text
+auth/
+├── src/
+│   ├── Contracts
+│   │   ├── CanResetPassword.ts
+│   │   ├── CanVerifyEmail.ts
+│   │   ├── EventDispatcher.ts
+│   │   ├── PasswordBroker.ts
+│   │   ├── RateLimiter.ts
+│   │   └── UserProvider.ts
+│   ├── Guards
+│   │   ├── BasicGuard.ts
+│   │   ├── JwtGuard.ts
+│   │   ├── SessionGuard.ts
+│   │   └── TokenGuard.ts
+│   ├── Middleware
+│   │   ├── Authenticate.ts
+│   │   └── EnsureEmailIsVerified.ts
+│   ├── Passwords
+│   │   └── PasswordResetBroker.ts
+│   ├── AuthContext.ts
+│   ├── AuthManager.ts
+│   ├── Guard.ts
+│   ├── Hasher.ts
+│   └── index.ts
+├── tests/
+├── package.json
+├── tsconfig.json
+└── README.md
+```
+
