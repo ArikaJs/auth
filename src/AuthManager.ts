@@ -8,6 +8,7 @@ import { JwtGuard } from './Guards/JwtGuard';
 import { BasicGuard } from './Guards/BasicGuard';
 import { AuthContext } from './AuthContext';
 import { AsyncLocalStorage } from 'async_hooks';
+import { EloquentUserProvider } from './Providers/EloquentUserProvider';
 
 export class AuthManager {
     private providers: Map<string, UserProvider> = new Map();
@@ -78,35 +79,44 @@ export class AuthManager {
     }
 
     private createSessionDriver(name: string, config: any, request: any): SessionGuard {
-        const provider = this.providers.get(config.provider);
-        if (!provider) {
-            throw new Error(`User provider [${config.provider}] is not defined.`);
-        }
+        const provider = this.getProvider(config.provider);
         return new SessionGuard(provider, request.session);
     }
 
     private createTokenDriver(name: string, config: any, request: any): Guard {
-        const provider = this.providers.get(config.provider);
-        if (!provider) {
-            throw new Error(`User provider [${config.provider}] is not defined.`);
-        }
+        const provider = this.getProvider(config.provider);
         return new TokenGuard(provider, request);
     }
 
     private createJwtDriver(name: string, config: any, request: any): Guard {
-        const provider = this.providers.get(config.provider);
-        if (!provider) {
-            throw new Error(`User provider [${config.provider}] is not defined.`);
-        }
+        const provider = this.getProvider(config.provider);
         return new JwtGuard(provider, request, config.secret || 'default_secret', config.options || {});
     }
 
     private createBasicDriver(name: string, config: any, request: any): Guard {
-        const provider = this.providers.get(config.provider);
-        if (!provider) {
-            throw new Error(`User provider [${config.provider}] is not defined.`);
-        }
+        const provider = this.getProvider(config.provider);
         return new BasicGuard(provider, request);
+    }
+
+    private getProvider(name: string): UserProvider {
+        // 1. Check if registered manually
+        if (this.providers.has(name)) {
+            return this.providers.get(name)!;
+        }
+
+        // 2. Resolve from config
+        const config = this.config.providers?.[name];
+        if (!config) {
+            throw new Error(`User provider [${name}] is not defined.`);
+        }
+
+        if (config.driver === 'eloquent') {
+            const provider = new EloquentUserProvider(config.model);
+            this.providers.set(name, provider);
+            return provider;
+        }
+
+        throw new Error(`User provider driver [${config.driver}] is not supported.`);
     }
 
     public shouldUse(name: string): void {

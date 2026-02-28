@@ -3,7 +3,10 @@ import { AuthManager } from '../AuthManager';
 export class Authenticate {
     protected guards: string[] = [];
 
-    constructor(private auth: AuthManager) { }
+    private auth: AuthManager;
+    constructor(auth: AuthManager) {
+        this.auth = auth instanceof AuthManager ? auth : (auth as any).resolve(AuthManager);
+    }
 
     /**
      * Set the guards that should be checked.
@@ -17,7 +20,7 @@ export class Authenticate {
      * Handle the incoming request.
      * Creates a per-request AuthContext and binds it to req.auth
      */
-    public async handle(request: any, next: (request: any) => Promise<any> | any): Promise<any> {
+    public async handle(request: any, next: (request: any) => Promise<any> | any, response?: any): Promise<any> {
         // 1. Create an isolated AuthContext for this request (binds to req.auth)
         const context = this.auth.createContext(request);
 
@@ -37,7 +40,14 @@ export class Authenticate {
             }
 
             // 5. Fail if no guard authenticated
-            throw new Error('Unauthenticated.');
+            return this.unauthenticated(request, guardsToCheck, response);
         });
+    }
+
+    /**
+     * Handle an unauthenticated user.
+     */
+    protected unauthenticated(request: any, guards: string[], response?: any): any {
+        throw new Error('Unauthenticated.');
     }
 }

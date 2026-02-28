@@ -15,3 +15,4 @@ export * from './Guards/BasicGuard';
 export * from './Passwords/PasswordResetBroker';
 export * from './Middleware/Authenticate';
 export * from './Middleware/EnsureEmailIsVerified';
+export * from './Providers/EloquentUserProvider';

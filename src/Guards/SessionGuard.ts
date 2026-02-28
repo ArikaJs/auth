@@ -4,12 +4,23 @@ import * as crypto from 'crypto';
 
 export class SessionGuard implements Guard {
     private provider: UserProvider;
-    private session: any; // Ideally this should be a Session interface from @arikajs/session
+    private session: any;
     private loggedUser: any = null;
 
     constructor(provider: UserProvider, session: any) {
         this.provider = provider;
-        this.session = session;
+        // If no session is provided, create a lightweight in-memory fallback
+        // so the guard doesn't crash when there's no session middleware
+        if (session && (typeof session.get === 'function' || typeof session.put === 'function')) {
+            this.session = session;
+        } else {
+            const store: Record<string, any> = {};
+            this.session = {
+                get(key: string) { return store[key] ?? null; },
+                put(key: string, value: any) { store[key] = value; },
+                forget(key: string) { delete store[key]; },
+            };
+        }
     }
 
     public async check(): Promise<boolean> {

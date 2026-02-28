@@ -128,12 +128,21 @@ export class JwtGuard implements Guard {
     }
 
     protected getTokenForRequest(): string | null {
-        if (this.request?.headers?.['authorization']) {
-            const authHeader = this.request.headers['authorization'];
-            if (authHeader.startsWith('Bearer ')) {
-                return authHeader.substring(7);
-            }
+        let authHeader: string | undefined;
+
+        // Support ArikaJS Request with header() method
+        if (typeof this.request?.header === 'function') {
+            authHeader = this.request.header('authorization') as string;
         }
+        // Fallback to raw headers object
+        if (!authHeader && this.request?.headers?.['authorization']) {
+            authHeader = this.request.headers['authorization'];
+        }
+
+        if (authHeader && authHeader.startsWith('Bearer ')) {
+            return authHeader.substring(7);
+        }
+
         return null;
     }
 }
