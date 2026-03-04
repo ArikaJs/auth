@@ -148,7 +148,7 @@ describe('Arika Auth', () => {
         };
 
         // Override config to default to 'api' for this test
-        config.default = 'api';
+        authManager.shouldUse('api');
 
         // Hack: mock the provider to accept this token
         const provider = authManager['providers'].get('users') as MockPoolProvider;

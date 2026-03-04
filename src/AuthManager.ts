@@ -15,10 +15,12 @@ export class AuthManager {
     private eventDispatcher: EventDispatcher | null = null;
     private rateLimiter: RateLimiter | null = null;
     private config: any;
+    private defaultGuard: string;
     private als = new AsyncLocalStorage<AuthContext>();
 
     constructor(config: any) {
         this.config = config;
+        this.defaultGuard = config.default || 'web';
     }
 
     public setEventDispatcher(dispatcher: EventDispatcher): void {
@@ -38,7 +40,7 @@ export class AuthManager {
     }
 
     public getDefaultGuard(): string {
-        return this.config.default;
+        return this.defaultGuard;
     }
 
     public createContext(request: any): AuthContext {
@@ -120,7 +122,7 @@ export class AuthManager {
     }
 
     public shouldUse(name: string): void {
-        this.config.default = name;
+        this.defaultGuard = name;
     }
 
     public runWithContext<T>(context: AuthContext, fn: () => T | Promise<T>): T | Promise<T> {
@@ -174,7 +176,7 @@ export class AuthManager {
 
     // Called by AuthContext to run attempts
     public async attemptForContext(context: AuthContext, credentials: Record<string, any>, remember: boolean = false): Promise<boolean | string> {
-        this.fireEvent('Auth.Attempting', { credentials, remember, guard: this.config.default });
+        this.fireEvent('Auth.Attempting', { credentials, remember, guard: this.defaultGuard });
 
         const throttleKey = this.getThrottleKey(credentials, context.getRequest());
 
@@ -194,7 +196,7 @@ export class AuthManager {
                     await this.rateLimiter.clear(throttleKey);
                 }
                 const user = await guard.user();
-                this.fireEvent('Auth.Login', { user, guard: this.config.default });
+                this.fireEvent('Auth.Login', { user, guard: this.defaultGuard });
                 return successOrToken; // Can return boolean true or JWT string
             }
 
@@ -202,11 +204,11 @@ export class AuthManager {
                 await this.rateLimiter.hit(throttleKey, 1); // 1 minute decay
             }
 
-            this.fireEvent('Auth.Failed', { credentials, guard: this.config.default });
+            this.fireEvent('Auth.Failed', { credentials, guard: this.defaultGuard });
             return false;
         }
 
-        throw new Error(`Guard [${this.config.default}] does not support login attempts.`);
+        throw new Error(`Guard [${this.defaultGuard}] does not support login attempts.`);
     }
 
     // Called by AuthContext to log in
@@ -214,10 +216,10 @@ export class AuthManager {
         const guard = context.guard() as any;
         if (typeof guard.login === 'function') {
             await guard.login(user, remember);
-            this.fireEvent('Auth.Login', { user, guard: this.config.default });
+            this.fireEvent('Auth.Login', { user, guard: this.defaultGuard });
             return;
         }
-        throw new Error(`Guard [${this.config.default}] does not support login.`);
+        throw new Error(`Guard [${this.defaultGuard}] does not support login.`);
     }
 
     // Called by AuthContext to log out
@@ -227,10 +229,10 @@ export class AuthManager {
 
         if (typeof guard.logout === 'function') {
             guard.logout();
-            this.fireEvent('Auth.Logout', { user, guard: this.config.default });
+            this.fireEvent('Auth.Logout', { user, guard: this.defaultGuard });
             return;
         }
-        throw new Error(`Guard [${this.config.default}] does not support logout.`);
+        throw new Error(`Guard [${this.defaultGuard}] does not support logout.`);
     }
 
     // ── Email Verification ──────────────────────────────────────────
